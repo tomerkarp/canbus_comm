@@ -24,23 +24,34 @@ CAN_ID.update({v: k for k, v in CAN_ID.items()})
 def main():
     ports = serial.tools.list_ports.comports()
     for i, port in enumerate(ports):
-        print(i + ". " + port.device)
+        print(f"{i}. " + port.device)
     port = ports[int(input("Select a port: "))]
-    bus = can.interface.Bus(channel = port.device, interface = 'slcan', bitrate = BITRATE)
+    bus = CanInterface(port.device)
+    option = input("Enter g to s position or q to quit: ")
+    if option == "g":
+        print(bus.set_postion(100))
+        bus.close()
+    elif option == "q":
+        bus.close()
+        return
+    else:
+        print("Invalid input")
+
 
 
 
 
 class CanInterface:
     def __init__(self, port, bitrate = BITRATE):
-        self.bus = can.interface.Bus(channel = port, bustype = 'slcan', bitrate = bitrate)
+        self.bus = can.interface.Bus(channel = port, interface = 'slcan', bitrate = bitrate)
         self.buff = bytearray(8)
         self.position = 0 
-        self.right_limit = 0
-        self.left_limit = 0
+        self.right_limit = 200
+        self.left_limit = -200
+    
     def _send(self, id, data, extended_id = True):
         msg_send = can.Message(arbitration_id = id, data = data, is_extended_id = extended_id)
-        self.bus.send(msg_send)
+        self.bus.send(msg_send, timeout = 0.2)
 
     def set_limits(self, left, right):
         self._send(CAN_ID["limit_left"], self._convert_steering_limit(left))
@@ -58,17 +69,19 @@ class CanInterface:
             angle_setpoint = self.left_limit
         elif angle_setpoint > self.right_limit:
             angle_setpoint = self.right_limit
-        self.position = self.get_position()
+        # self.position = self.get_position()
         delta = angle_setpoint - self.position
 
         SCALING_FACTOR = 200704/360
         position_setpoint = int(delta * SCALING_FACTOR)
         buff = struct.pack("<ii", position_setpoint, 0)
         self._send(CAN_ID["position"], buff)
+        print(f"Position setpoint: {position_setpoint}")
 
     def get_position(self):
         self._send(CAN_ID["get_position"], [160,00,40,2,0,0,0,0])
         message = self.bus.recv()
+        print(message)
         if message is not None:
             if message.arbitration_id == CAN_ID["receive_position"]:
                 data = message.data
@@ -92,3 +105,6 @@ class CanInterface:
 
     def close(self):
         self.bus.shutdown()
+
+if __name__ == "__main__":
+    main()
